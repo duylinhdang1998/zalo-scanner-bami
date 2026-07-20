@@ -44,6 +44,15 @@ def _make_engine():
     max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "10"))
     pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
 
+    connect_args: dict = {}
+    # psycopg3 + PgBouncer transaction pooler (Supabase cổng 6543): psycopg3
+    # tự tạo prepared statement ("_pg3_0"), nhưng PgBouncer tái dùng connection
+    # giữa các client → lỗi DuplicatePreparedStatement (ngắt quãng khi restart).
+    # prepare_threshold=None → KHÔNG dùng server-side prepared statement → hết lỗi.
+    _is_psycopg3 = "+psycopg" in _url and "+psycopg2" not in _url
+    if _is_psycopg3:
+        connect_args["prepare_threshold"] = None
+
     return create_engine(
         _url,
         echo=False,
@@ -51,6 +60,7 @@ def _make_engine():
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_timeout=pool_timeout,
+        connect_args=connect_args,
     )
 
 
@@ -59,10 +69,14 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def init_db() -> None:
-    """Tạo bảng nếu chưa có — dùng cho dev/SQLite.
-    Production Postgres: chạy `alembic upgrade head` thay thế.
+    """Tạo bảng nếu chưa có — CHỈ cho dev/SQLite.
+
+    Production Postgres/Supabase: schema do `alembic upgrade head` quản lý
+    (entrypoint chạy trước khi start bot). Bỏ qua create_all ở đây để không
+    phát sinh truy vấn reflection thừa qua PgBouncer lúc khởi động.
     """
-    Base.metadata.create_all(engine)
+    if _is_sqlite:
+        Base.metadata.create_all(engine)
 
 
 @contextmanager
