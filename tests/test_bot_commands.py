@@ -35,8 +35,19 @@ class TestPeriodWord:
     def test_empty_arg_defaults_to_today(self):
         assert handlers._period_word("") == "today"
 
-    def test_passes_through_period_string(self):
-        assert handlers._period_word("tháng này") == "tháng này"
+    def test_normalizes_period_phrase_to_token(self):
+        # Chuẩn hoá cụm tiếng Việt → token canonical (resolve() hiểu như nhau).
+        assert handlers._period_word("tháng này") == "this_month"
+        assert handlers._period_word("hôm qua") == "yesterday"
+
+    def test_extracts_dash_date_from_long_phrase(self):
+        # Bug fix: '/baocao báo cáo ngày 19-7-2026' phải trích ra đúng ngày.
+        assert handlers._period_word("báo cáo ngày 19-7-2026") == "day:2026-07-19"
+        # Thiếu năm → suy ra năm hiện tại (không hardcode để test khỏi phụ thuộc).
+        from datetime import date
+        y = date.today().year
+        assert handlers._period_word("báo cáo ngày 19-7") == f"day:{y}-07-19"
+        assert handlers._period_word("19/7") == f"day:{y}-07-19"
 
 
 # ── cmd_xoa ───────────────────────────────────────────────────────────────────

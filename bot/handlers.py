@@ -569,4 +569,15 @@ def _arg(update) -> str:
 
 
 def _period_word(arg: str) -> str:
-    return arg.strip() or "today"
+    """Trích period token từ phần text sau lệnh.
+
+    Dùng chung bộ trích search-based của router để hiểu được cả cụm dài
+    ('báo cáo ngày 19-7-2026'), ngày lẻ ('19/7'), 'tháng 3',
+    'từ 1/7 đến 10/7'... thay vì fullmatch cả câu như trước.
+    """
+    a = arg.strip()
+    if not a:
+        return "today"
+    from nlq.router import _keyword_period
+
+    return _keyword_period(a.lower())

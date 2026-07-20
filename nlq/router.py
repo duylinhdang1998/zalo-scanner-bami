@@ -210,9 +210,10 @@ def _keyword_period(t: str) -> str:
     """
     today = _date.today()
 
-    # Ưu tiên 1: "từ dd/mm[/yyyy] đến dd/mm[/yyyy]"
+    # Ưu tiên 1: "từ dd/mm[/yyyy] đến dd/mm[/yyyy]" (chấp nhận cả '/', '-', '.')
     m = re.search(
-        r"từ\s+(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\s+đến\s+(\d{1,2}/\d{1,2}(?:/\d{2,4})?)",
+        r"từ\s+(\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?)\s+đến\s+"
+        r"(\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?)",
         t,
     )
     if m:
@@ -252,10 +253,10 @@ def _keyword_period(t: str) -> str:
         if 1 <= q <= 4:
             return f"quý:{q}"
 
-    # Ưu tiên 5: ngày lẻ "ngày 19/07", "19/07", "19/07/2026"
+    # Ưu tiên 5: ngày lẻ "ngày 19/07", "19/07", "19/07/2026" (nhận cả '-', '.')
     # Chỉ bắt sau khi range & keyword đã xử lý → không conflict
     m = re.search(
-        r"(?:^|\s)(?:ngày\s+)?(\d{1,2}/\d{1,2}(?:/\d{2,4})?)(?=\s|$)",
+        r"(?:^|\s)(?:ngày\s+|ngay\s+)?(\d{1,2}[/.\-]\d{1,2}(?:[/.\-]\d{2,4})?)(?=\s|$)",
         t,
     )
     if m:
@@ -267,8 +268,11 @@ def _keyword_period(t: str) -> str:
 
 
 def _parse_vn_date(s: str, default_year: int):
-    """Parse ngày dạng dd/mm hoặc dd/mm/yyyy → date object. Trả None nếu không hợp lệ."""
-    parts = s.strip().split("/")
+    """Parse ngày dạng dd/mm hoặc dd/mm/yyyy → date object. Trả None nếu không hợp lệ.
+
+    Chấp nhận dấu phân cách '/', '-' hoặc '.' (VD: 19/7, 19-7-2026, 19.7).
+    """
+    parts = re.split(r"[/.\-]", s.strip())
     try:
         if len(parts) == 2:
             day, month = int(parts[0]), int(parts[1])

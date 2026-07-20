@@ -87,8 +87,10 @@ def resolve(period: str | None) -> tuple[Period, str]:
         except ValueError:
             pass
 
-    # ── Ngày lẻ trực tiếp: "19/07", "19/07/2026", "ngày 19/07" ───────
-    m = re.fullmatch(r"(?:ngày\s+|ngay\s+)?(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", pl)
+    # ── Ngày lẻ trực tiếp: "19/07", "19-07-2026", "ngày 19.07" ───────
+    m = re.fullmatch(
+        r"(?:ngày\s+|ngay\s+)?(\d{1,2})[/.\-](\d{1,2})(?:[/.\-](\d{2,4}))?", pl
+    )
     if m:
         try:
             day_ = int(m.group(1))
