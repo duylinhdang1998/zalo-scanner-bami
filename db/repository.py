@@ -185,6 +185,23 @@ def delete_document(doc_id: int, group_id: str | None) -> bool:
         return True
 
 
+def delete_store_report(report_id: int, group_id: str | None) -> bool:
+    """Xoá 1 báo cáo cửa hàng + kênh/SP/tồn (cascade ORM).
+
+    Tôn trọng DATA_SCOPE giống các query store_report:
+      • shared   → xoá được bất kể chat nào lưu (kho chung).
+      • per_chat → chỉ xoá báo cáo thuộc đúng nhóm đang thao tác.
+    """
+    with get_session() as s:
+        rpt = s.get(StoreReport, report_id)
+        if rpt is None:
+            return False
+        if _DATA_SCOPE == "per_chat" and group_id and rpt.group_id != group_id:
+            return False
+        s.delete(rpt)  # cascade: channels/products/inventory
+        return True
+
+
 # ── Thống kê ───────────────────────────────────────────────────────
 def revenue_summary(group_id: str | None, start: date, end: date) -> dict[str, Any]:
     """Tổng doanh thu + số hoá đơn trong khoảng [start, end]."""

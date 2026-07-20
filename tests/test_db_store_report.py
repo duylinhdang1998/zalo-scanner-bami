@@ -826,3 +826,34 @@ class TestMergeStoreReport:
         )
         assert r2.is_merged is False
         assert r2.document.id != r1.document.id
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 10. delete_store_report — xoá báo cáo cửa hàng (+ cascade), tôn trọng DATA_SCOPE
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestDeleteStoreReport:
+    def test_delete_removes_report_and_children(self, fresh_db):
+        r = _save(image_hash="hdel")
+        rid = r.document.id
+        ok = db.repository.delete_store_report(rid, "g1")
+        assert ok is True
+        # Không còn tồn kho của báo cáo đó
+        assert db.repository.inventory_latest("g1") == []
+        # Xoá lần 2 → False
+        assert db.repository.delete_store_report(rid, "g1") is False
+
+    def test_delete_missing_returns_false(self, fresh_db):
+        assert db.repository.delete_store_report(999999, "g1") is False
+
+    def test_shared_scope_deletes_across_chats(self, fresh_db, monkeypatch):
+        monkeypatch.setattr(db.repository, "_DATA_SCOPE", "shared")
+        r = _save(group_id="g1", image_hash="hs")
+        # Xoá từ chat khác (g2) vẫn được vì kho chung
+        assert db.repository.delete_store_report(r.document.id, "g2") is True
+
+    def test_per_chat_scope_blocks_other_chat(self, fresh_db, monkeypatch):
+        monkeypatch.setattr(db.repository, "_DATA_SCOPE", "per_chat")
+        r = _save(group_id="g1", image_hash="hp")
+        assert db.repository.delete_store_report(r.document.id, "g2") is False
+        assert db.repository.delete_store_report(r.document.id, "g1") is True

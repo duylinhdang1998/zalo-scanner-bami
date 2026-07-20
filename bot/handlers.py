@@ -378,8 +378,16 @@ async def cmd_xoa(update, context) -> None:
         if not arg.isdigit():
             await _reply(update, "Cú pháp: /xoa <id>. Vd: /xoa 12")
             return
-        ok = repo.delete_document(int(arg), gid)
-        await _reply(update, f"🗑️ Đã xoá bản ghi #{arg}." if ok else f"Không thấy bản ghi #{arg}.")
+        rid = int(arg)
+        # Ưu tiên xoá BÁO CÁO CỬA HÀNG (store_reports) — dữ liệu chính hiện tại;
+        # nếu không có thì mới thử bảng documents (hoá đơn/đơn hàng cũ).
+        _del_rpt = getattr(repo, "delete_store_report", None)
+        if _del_rpt is not None and _del_rpt(rid, gid):
+            await _reply(update, f"🗑️ Đã xoá báo cáo #{rid} (kèm kênh/sản phẩm/tồn kho).")
+        elif repo.delete_document(rid, gid):
+            await _reply(update, f"🗑️ Đã xoá bản ghi #{rid}.")
+        else:
+            await _reply(update, f"Không thấy báo cáo/bản ghi #{rid}.")
     except Exception:  # noqa: BLE001
         log.exception("cmd_xoa | group=%s — lỗi", gid)
         await _reply(update, "⚠️ Xoá không thành công. Thử lại sau nhé.")
