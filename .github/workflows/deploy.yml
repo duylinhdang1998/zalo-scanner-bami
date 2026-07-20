@@ -75,7 +75,7 @@ jobs:
           # 4. Dọn image cũ không dùng nữa
           script: |
             set -e
-            cd ~/deploy
+            cd /home/dlm/9learning/zalo-bot-scanner
             echo "Pulling new image..."
             docker compose pull
             echo "Restarting container..."

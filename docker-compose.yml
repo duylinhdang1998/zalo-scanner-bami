@@ -15,8 +15,8 @@ services:
     # Tự khởi động lại khi crash hoặc VPS reboot
     restart: unless-stopped
 
-    # Đọc toàn bộ biến môi trường từ file .env đặt cùng thư mục trên VPS
-    env_file: .env
+    # Đọc toàn bộ biến môi trường từ file .env.prod đặt cùng thư mục trên VPS
+    env_file: .env.prod
 
     # JSON-file logging: giới hạn dung lượng tránh đầy disk VPS
     logging:

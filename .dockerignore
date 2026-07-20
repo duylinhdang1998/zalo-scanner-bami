@@ -30,6 +30,7 @@ pytest.ini
 
 # ─── Secrets & configs local ──────────────────────────────────────────────
 .env
+.env.prod
 .env.local
 .env.*.local
 

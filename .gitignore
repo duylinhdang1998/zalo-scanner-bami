@@ -1,5 +1,7 @@
-# Secrets
+# Secrets (giữ .env.example được track)
 .env
+.env.prod
+.env.local
 
 # Data files (local DB + logs)
 data/*.db
