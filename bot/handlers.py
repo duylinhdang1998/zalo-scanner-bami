@@ -64,6 +64,37 @@ def _check_rate_limit(user_id: str | None) -> bool:
     return True
 
 
+# ── Gộp nhiều ảnh cùng lượt gửi thành 1 báo cáo cửa hàng ────────────────────
+# Báo cáo cửa hàng thường bị chụp tách nhiều ảnh (doanh thu / số lượng / tồn kho).
+# Ảnh gửi liên tiếp bởi CÙNG người trong CÙNG nhóm, trong report_merge_window_sec,
+# sẽ ghép chung vào 1 báo cáo. State chỉ trong RAM (bot 1 tiến trình) — mất khi
+# restart cũng không sao (tệ nhất là tách thành báo cáo mới).
+# {(group_id, sender_id): (report_id, monotonic_ts)}
+_report_sessions: dict[tuple[str | None, str | None], tuple[int, float]] = {}
+
+
+def _merge_target(gid: str | None, uid: str | None) -> int | None:
+    """Trả report_id đang mở của (nhóm, người gửi) nếu còn trong cửa sổ, else None."""
+    window = settings.report_merge_window_sec
+    if window <= 0:
+        return None
+    entry = _report_sessions.get((gid, uid))
+    if entry is None:
+        return None
+    report_id, ts = entry
+    if time.monotonic() - ts > window:
+        _report_sessions.pop((gid, uid), None)
+        return None
+    return report_id
+
+
+def _remember_report(gid: str | None, uid: str | None, report_id: int | None) -> None:
+    """Ghi nhớ báo cáo vừa lưu/ghép để ảnh kế tiếp cùng lượt gộp vào."""
+    if settings.report_merge_window_sec <= 0 or not report_id:
+        return
+    _report_sessions[(gid, uid)] = (report_id, time.monotonic())
+
+
 # ── Helper reply ─────────────────────────────────────────────────────────────
 async def _reply(update, text: str) -> None:
     msg = getattr(update, "message", None)
@@ -181,6 +212,8 @@ async def on_photo(update, context) -> None:
             log.warning("on_photo store_report | save_store_report chưa có trong repo")
             await _reply(update, "⚠️ Chức năng lưu báo cáo cửa hàng chưa sẵn sàng. Thử lại sau.")
             return
+        # Ảnh gửi liên tiếp cùng lượt → ghép vào báo cáo đang mở (nếu có)
+        merge_target = _merge_target(gid, uid)
         try:
             result = _save_fn(
                 group_id=gid,
@@ -190,6 +223,7 @@ async def on_photo(update, context) -> None:
                 image_hash=image_hash,
                 data=data,
                 branch_override=caption,
+                merge_report_id=merge_target,
             )
         except Exception:  # noqa: BLE001
             log.exception("on_photo store_report | group=%s sender=%s — save lỗi", gid, uid)
@@ -202,11 +236,16 @@ async def on_photo(update, context) -> None:
             )
             await _reply(update, "♻️ Báo cáo này đã lưu rồi.")
             return
+        _remember_report(gid, uid, getattr(result.document, "id", None))
         log.info(
-            "on_photo store_report | group=%s sender=%s — lưu OK id=%s",
-            gid, uid, getattr(result.document, "id", "?"),
+            "on_photo store_report | group=%s sender=%s — %s OK id=%s",
+            gid, uid, "ghép" if result.is_merged else "lưu",
+            getattr(result.document, "id", "?"),
         )
-        await _reply(update, fmt.store_report_saved_block(report_data, result.document, branch))
+        if result.is_merged:
+            await _reply(update, fmt.store_report_merged_block(report_data, result.document))
+        else:
+            await _reply(update, fmt.store_report_saved_block(report_data, result.document, branch))
         return
     # ─────────────────────────────────────────────────────────────────
 

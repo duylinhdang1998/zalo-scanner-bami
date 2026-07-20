@@ -710,3 +710,119 @@ class TestDataScope:
         rows = db.repository.revenue_by_channel("g1", date(2026, 7, 1), date(2026, 7, 31))
         assert len(rows) == 1
         assert rows[0]["channel"] == "grab"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# N. Gộp nhiều ảnh cùng lượt gửi (merge_report_id)
+# ════════════════════════════════════════════════════════════════════════════
+
+def _inv_only(report_date=None, branch=None, inventory=None, image_hash="hinv"):
+    """Ảnh TỒN KHO đứng một mình: không kênh, không tổng tiền, không cơ sở."""
+    if inventory is None:
+        inventory = [{"name": "HA", "open": 100.0, "import": 0.0, "discard": 0.0, "close": 22.0}]
+    return _data(
+        report_date=report_date or "2026-07-20",  # ảnh tồn kho thường bị gán "hôm nay"
+        branch=branch, gross=0, cost=0, net=0, cash=0, transfer=0,
+        channels=[], products=[], inventory=inventory,
+    )
+
+
+class TestMergeStoreReport:
+    def test_revenue_then_inventory_merges_same_report(self, fresh_db):
+        rev = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_rev",
+            data=_data(report_date="2026-07-19", branch="Trần Đăng Ninh", inventory=[]),
+        )
+        rid = rev.document.id
+        merged = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_inv",
+            data=_inv_only(), merge_report_id=rid,
+        )
+        assert merged.is_merged is True
+        assert merged.is_duplicate is False
+        assert merged.document.id == rid           # cùng 1 báo cáo
+        # Ngày + cơ sở GIỮ NGUYÊN (ảnh tồn kho không phải sheet doanh thu)
+        assert merged.document.report_date == date(2026, 7, 19)
+        assert merged.document.branch == "Trần Đăng Ninh"
+        # Có cả kênh (từ ảnh doanh thu) lẫn tồn kho (ảnh vừa ghép)
+        assert len(merged.document.channels) == 2
+        assert len(merged.document.inventory) == 1
+
+    def test_inventory_first_then_revenue_backfills_date_branch(self, fresh_db):
+        # Ảnh tồn kho gửi TRƯỚC: date=hôm nay, branch=None
+        inv = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_inv",
+            data=_inv_only(report_date="2026-07-20", branch=None),
+        )
+        rid = inv.document.id
+        assert inv.document.branch is None
+        # Ảnh doanh thu gửi SAU → ghép + backfill ngày/cơ sở/tổng tiền
+        merged = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_rev",
+            data=_data(report_date="2026-07-19", branch="Trần Đăng Ninh", inventory=[]),
+            merge_report_id=rid,
+        )
+        assert merged.is_merged is True
+        assert merged.document.id == rid
+        assert merged.document.report_date == date(2026, 7, 19)   # backfilled
+        assert merged.document.branch == "Trần Đăng Ninh"          # backfilled
+        assert merged.document.net_revenue == 4_000_000            # totals ghi đè
+        assert len(merged.document.inventory) == 1
+        assert len(merged.document.channels) == 2
+
+    def test_merged_inventory_visible_in_inventory_latest(self, fresh_db):
+        rev = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_rev",
+            data=_data(report_date="2026-07-19", branch="Trần Đăng Ninh", inventory=[]),
+        )
+        db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_inv",
+            data=_inv_only(inventory=[
+                {"name": "HA", "open": 100.0, "import": 0.0, "discard": 0.0, "close": 22.0},
+                {"name": "G", "open": 30.0, "import": 0.0, "discard": 0.0, "close": 15.0},
+            ]),
+            merge_report_id=rev.document.id,
+        )
+        rows = db.repository.inventory_latest("g1")
+        names = {r["name"] for r in rows}
+        assert "HA" in names and "G" in names
+
+    def test_resending_merged_image_is_duplicate(self, fresh_db):
+        rev = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_rev", data=_data(),
+        )
+        db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_inv",
+            data=_inv_only(), merge_report_id=rev.document.id,
+        )
+        # Gửi lại đúng ảnh tồn kho đó → phải nhận là trùng, không nhân đôi
+        again = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h_inv",
+            data=_inv_only(), merge_report_id=rev.document.id,
+        )
+        assert again.is_duplicate is True
+        rows = db.repository.inventory_latest("g1")
+        # Chỉ 1 dòng HA (không nhân đôi do gửi lại)
+        assert len([r for r in rows if r["name"] == "HA"]) == 1
+
+    def test_no_merge_target_creates_new_report(self, fresh_db):
+        r1 = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h1", data=_data(),
+        )
+        r2 = db.repository.save_store_report(
+            group_id="g1", sender_id="u1", sender_name="A",
+            image_url=None, image_hash="h2", data=_data(),
+            merge_report_id=None,
+        )
+        assert r2.is_merged is False
+        assert r2.document.id != r1.document.id

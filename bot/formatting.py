@@ -151,6 +151,34 @@ def store_report_saved_block(report_data: dict, doc, branch: str | None = None) 
     return "\n".join(lines)
 
 
+def store_report_merged_block(report_data: dict, doc) -> str:
+    """Thông báo phần vừa GHÉP thêm vào báo cáo đang mở (ảnh cùng lượt gửi).
+
+    report_data: dict của ẢNH VỪA GỬI (phần được thêm).
+    doc: StoreReport sau khi ghép (đã cập nhật ngày/cơ sở) — dùng .id/.branch/.report_date.
+    """
+    channels = report_data.get("channels") or []
+    products = report_data.get("products") or []
+    inventory = report_data.get("inventory") or []
+    added: list[str] = []
+    if channels:
+        added.append(f"{len(channels)} kênh doanh thu")
+    if products:
+        added.append(f"{len(products)} sản phẩm bán")
+    if inventory:
+        added.append(f"{len(inventory)} mặt hàng tồn kho")
+    what = ", ".join(added) if added else "dữ liệu"
+
+    doc_id = getattr(doc, "id", "?") if doc is not None else "?"
+    branch_label = getattr(doc, "branch", None) or "(không rõ)"
+    rdate = getattr(doc, "report_date", None)
+    rdate_s = rdate.strftime("%d/%m/%Y") if rdate else "?"
+    return (
+        f"➕ Đã bổ sung {what} vào báo cáo #{doc_id} — {branch_label} ({rdate_s}).\n"
+        f"(gộp các ảnh cùng lượt gửi vào 1 báo cáo)"
+    )
+
+
 def channels_block(label: str, rows: list[dict], branch: str | None = None) -> str:
     """Doanh thu theo kênh bán hàng.
 

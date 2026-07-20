@@ -30,6 +30,11 @@ class Settings:
     scan_mode: str = _get("SCAN_MODE", "mention")  # "mention" | "auto"
     confirm_threshold: float = float(_get("CONFIRM_THRESHOLD", "0.6") or 0.6)
 
+    # Gộp nhiều ảnh cùng 1 lượt gửi (báo cáo cửa hàng bị chụp tách nhiều ảnh)
+    # thành 1 báo cáo: ảnh gửi liên tiếp bởi CÙNG người trong nhóm, trong
+    # khoảng này (giây) sẽ ghép chung. 0 = tắt (mỗi ảnh 1 báo cáo).
+    report_merge_window_sec: int = int(_get("REPORT_MERGE_WINDOW_SEC", "180") or 180)
+
     def require(self) -> None:
         """Kiểm tra các key bắt buộc trước khi khởi động."""
         missing = [

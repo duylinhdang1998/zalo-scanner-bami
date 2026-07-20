@@ -35,12 +35,16 @@ class SaveResult(NamedTuple):
 class StoreReportSaveResult(NamedTuple):
     """Kết quả lưu báo cáo cửa hàng.
 
-    document  — StoreReport đã lưu (hoặc đã có nếu trùng).
+    document  — StoreReport đã lưu / ghép / đã có nếu trùng (có thể None khi
+                trùng ảnh phụ không truy ngược được báo cáo — handlers không
+                đọc document ở nhánh trùng).
                 Tên giữ là 'document' để không phá vỡ handlers đang dùng .document.id.
     is_duplicate — True nếu ảnh đã tồn tại (cùng group_id + image_hash).
+    is_merged   — True nếu ảnh được GHÉP vào báo cáo đang mở (không tạo báo cáo mới).
     """
-    document: StoreReport
+    document: StoreReport | None
     is_duplicate: bool
+    is_merged: bool = False
 
 
 # ── Lưu ────────────────────────────────────────────────────────────
@@ -389,6 +393,70 @@ def full_report(group_id: str | None, start: date, end: date) -> dict:
 
 # ── Sprint 3: Báo cáo cửa hàng theo ngày ─────────────────────────────────────
 
+def _insert_report_rows(s, report_id: int, report_data: dict[str, Any]) -> None:
+    """Chèn kênh/sản phẩm/tồn kho cho 1 báo cáo (dùng chung create & merge)."""
+    for ch in report_data.get("channels") or []:
+        s.add(
+            ReportChannel(
+                report_id=report_id,
+                channel=str(ch.get("channel") or ""),
+                revenue=int(_safe_float(ch.get("revenue"), 0.0)),
+                banh_qty=_safe_float(ch.get("banh_qty"), 0.0),
+                nuoc_qty=_safe_float(ch.get("nuoc_qty"), 0.0),
+            )
+        )
+    for pr in report_data.get("products") or []:
+        s.add(
+            ReportProduct(
+                report_id=report_id,
+                name=str(pr.get("name") or ""),
+                category=_safe_str(pr.get("category")),
+                qty_grab=_safe_float(pr.get("grab"), 0.0),
+                qty_now_shopee=_safe_float(pr.get("now_shopee"), 0.0),
+                qty_xanh=_safe_float(pr.get("xanh"), 0.0),
+                qty_be=_safe_float(pr.get("be"), 0.0),
+                qty_cua_hang=_safe_float(pr.get("cua_hang"), 0.0),
+                qty_total=_safe_float(pr.get("total"), 0.0),
+            )
+        )
+    for inv in report_data.get("inventory") or []:
+        s.add(
+            ReportInventory(
+                report_id=report_id,
+                name=str(inv.get("name") or ""),
+                open_qty=_safe_float(inv.get("open"), 0.0),
+                import_qty=_safe_float(inv.get("import"), 0.0),
+                discard_qty=_safe_float(inv.get("discard"), 0.0),
+                close_qty=_safe_float(inv.get("close"), 0.0),
+            )
+        )
+
+
+def _is_revenue_sheet(report_data: dict[str, Any], totals: dict[str, Any]) -> bool:
+    """Ảnh này là sheet DOANH THU (có kênh bán hoặc tổng tiền)?
+
+    Chỉ sheet doanh thu mới mang ngày + cơ sở đáng tin → khi merge, ưu tiên
+    lấy ngày/cơ sở/tổng tiền từ ảnh loại này (ảnh tồn kho/số lượng thiếu ngày).
+    """
+    if report_data.get("channels"):
+        return True
+    return any(
+        _safe_float(totals.get(k), 0.0) != 0.0
+        for k in ("gross_revenue", "net_revenue", "cash", "transfer", "cost")
+    )
+
+
+def _find_scan_by_hash(group_id: str, image_hash: str) -> Scan | None:
+    """Tìm Scan đã xử lý cùng group_id + image_hash (bắt trùng cả ảnh phụ đã ghép)."""
+    with get_session() as s:
+        return s.execute(
+            select(Scan).where(
+                Scan.group_id == group_id,
+                Scan.image_hash == image_hash,
+            ).limit(1)
+        ).scalar_one_or_none()
+
+
 def save_store_report(
     *,
     group_id: str | None,
@@ -398,22 +466,30 @@ def save_store_report(
     image_hash: str | None,
     data: dict[str, Any],
     branch_override: str | None = None,
+    merge_report_id: int | None = None,
 ) -> StoreReportSaveResult:
     """Ghi 1 Scan + 1 StoreReport + kênh/SP/tồn từ JSON model trả về.
 
     Dedup: cùng group_id + image_hash → trả StoreReport cũ (is_duplicate=True).
     branch_override: nếu không None, ghi đè branch đọc từ ảnh (dùng khi bot
                      lấy branch từ caption DM).
+    merge_report_id: nếu không None và báo cáo đó tồn tại → GHÉP ảnh này vào
+                     báo cáo đang mở (không tạo báo cáo mới). Ngày/cơ sở/tổng
+                     tiền chỉ ghi đè khi ảnh là sheet doanh thu.
 
     Returns:
-        StoreReportSaveResult(document=store_report, is_duplicate=bool)
+        StoreReportSaveResult(document, is_duplicate, is_merged).
         .document là StoreReport (field giữ tên 'document' để tương thích handlers).
     """
-    # Optimistic dedup check
+    # Optimistic dedup check (ảnh chính)
     if image_hash and group_id:
         existing = _find_store_report_by_hash(group_id, image_hash)
         if existing is not None:
             return StoreReportSaveResult(document=existing, is_duplicate=True)
+        # Ảnh phụ đã ghép trước đó cũng tính là trùng (không truy ngược báo cáo).
+        if _find_scan_by_hash(group_id, image_hash) is not None:
+            tgt = _get_store_report(merge_report_id) if merge_report_id else None
+            return StoreReportSaveResult(document=tgt, is_duplicate=True)
 
     report_data: dict[str, Any] = data.get("report") or {}
     totals: dict[str, Any] = report_data.get("totals") or {}
@@ -436,6 +512,33 @@ def save_store_report(
             s.add(scan)
             s.flush()
 
+            # ── Nhánh GHÉP vào báo cáo đang mở ────────────────────────
+            target = s.get(StoreReport, merge_report_id) if merge_report_id else None
+            if target is not None:
+                is_rev = _is_revenue_sheet(report_data, totals)
+                if is_rev:
+                    new_date = _parse_date(report_data.get("report_date"))
+                    if new_date is not None:
+                        target.report_date = new_date
+                    target.gross_revenue = int(_safe_float(totals.get("gross_revenue"), 0.0))
+                    target.cost = int(_safe_float(totals.get("cost"), 0.0))
+                    target.net_revenue = int(_safe_float(totals.get("net_revenue"), 0.0))
+                    target.cash = int(_safe_float(totals.get("cash"), 0.0))
+                    target.transfer = int(_safe_float(totals.get("transfer"), 0.0))
+                    target.discrepancy = int(_safe_float(totals.get("discrepancy"), 0.0))
+                # Cơ sở: lấy từ ảnh doanh thu, hoặc điền nếu báo cáo chưa có
+                if branch and (is_rev or not target.branch):
+                    target.branch = branch
+                _insert_report_rows(s, target.id, report_data)
+                s.flush()
+                _ = len(target.channels)
+                _ = len(target.products)
+                _ = len(target.inventory)
+                return StoreReportSaveResult(
+                    document=target, is_duplicate=False, is_merged=True
+                )
+
+            # ── Nhánh TẠO báo cáo mới ─────────────────────────────────
             rpt = StoreReport(
                 scan_id=scan.id,
                 group_id=group_id,
@@ -453,43 +556,7 @@ def save_store_report(
             s.add(rpt)
             s.flush()
 
-            for ch in report_data.get("channels") or []:
-                s.add(
-                    ReportChannel(
-                        report_id=rpt.id,
-                        channel=str(ch.get("channel") or ""),
-                        revenue=int(_safe_float(ch.get("revenue"), 0.0)),
-                        banh_qty=_safe_float(ch.get("banh_qty"), 0.0),
-                        nuoc_qty=_safe_float(ch.get("nuoc_qty"), 0.0),
-                    )
-                )
-
-            for pr in report_data.get("products") or []:
-                s.add(
-                    ReportProduct(
-                        report_id=rpt.id,
-                        name=str(pr.get("name") or ""),
-                        category=_safe_str(pr.get("category")),
-                        qty_grab=_safe_float(pr.get("grab"), 0.0),
-                        qty_now_shopee=_safe_float(pr.get("now_shopee"), 0.0),
-                        qty_xanh=_safe_float(pr.get("xanh"), 0.0),
-                        qty_be=_safe_float(pr.get("be"), 0.0),
-                        qty_cua_hang=_safe_float(pr.get("cua_hang"), 0.0),
-                        qty_total=_safe_float(pr.get("total"), 0.0),
-                    )
-                )
-
-            for inv in report_data.get("inventory") or []:
-                s.add(
-                    ReportInventory(
-                        report_id=rpt.id,
-                        name=str(inv.get("name") or ""),
-                        open_qty=_safe_float(inv.get("open"), 0.0),
-                        import_qty=_safe_float(inv.get("import"), 0.0),
-                        discard_qty=_safe_float(inv.get("discard"), 0.0),
-                        close_qty=_safe_float(inv.get("close"), 0.0),
-                    )
-                )
+            _insert_report_rows(s, rpt.id, report_data)
 
             s.flush()
             # Nạp sẵn quan hệ trước khi session đóng
@@ -505,6 +572,19 @@ def save_store_report(
             if existing is not None:
                 return StoreReportSaveResult(document=existing, is_duplicate=True)
         raise
+
+
+def _get_store_report(report_id: int | None) -> StoreReport | None:
+    """Lấy StoreReport theo id, nạp sẵn quan hệ trước khi session đóng."""
+    if not report_id:
+        return None
+    with get_session() as s:
+        row = s.get(StoreReport, report_id)
+        if row is not None:
+            _ = len(row.channels)
+            _ = len(row.products)
+            _ = len(row.inventory)
+        return row
 
 
 def _find_store_report_by_hash(group_id: str, image_hash: str) -> StoreReport | None:
