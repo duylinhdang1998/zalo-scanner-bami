@@ -62,20 +62,25 @@ jobs:
     steps:
       - name: SSH & Deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          # GITHUB_TOKEN có quyền đọc packages của repo này → dùng để login GHCR trên VPS
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           # VPS_PORT mặc định 22 nếu secret không được set
           port: ${{ secrets.VPS_PORT || '22' }}
+          # Truyền token GHCR vào VPS để docker login (không hardcode secret)
+          envs: GHCR_TOKEN,GHCR_ACTOR
           # Script chạy trên VPS:
-          # 1. Vào thư mục chứa docker-compose.yml + .env
-          # 2. Pull image mới nhất từ GHCR
-          # 3. Restart container (giữ .env hiện tại)
-          # 4. Dọn image cũ không dùng nữa
+          # 1. Đăng nhập GHCR (image private) → 2. pull → 3. restart → 4. dọn image cũ
           script: |
             set -e
             cd /home/dlm/9learning/zalo-bot-scanner
+            echo "Đăng nhập GHCR..."
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
             echo "Pulling new image..."
             docker compose pull
             echo "Restarting container..."
