@@ -1,0 +1,32 @@
+# Secrets
+.env
+
+# Data files (local DB + logs)
+data/*.db
+data/*.log
+data/*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+.coveragerc
+
+# OS
+.DS_Store
+*.swp
+
+# Claude IDE / agent memory (local tooling, not code)
+.claude/
+
+# VFM agent-company sprint/state (internal, not app code)
+.project/

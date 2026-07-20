@@ -1,0 +1,49 @@
+# ─── Môi trường ảo & cache Python ─────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ─── Dữ liệu local (không cần trong image) ────────────────────────────────
+data/
+*.db
+*.sqlite
+
+# ─── Git & project management ─────────────────────────────────────────────
+.git/
+.gitignore
+.project/
+.claude/
+
+# ─── Tests & scripts dev ───────────────────────────────────────────────────
+tests/
+scripts/
+.pytest_cache/
+.coverage
+.coveragerc
+pytest.ini
+
+# ─── Secrets & configs local ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── OS / IDE ─────────────────────────────────────────────────────────────
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# ─── Docs (không cần trong runtime image) ─────────────────────────────────
+README.md
+DEPLOY.md
+*.md
+
+# ─── run.sh (dev-only helper) ─────────────────────────────────────────────
+run.sh

@@ -1,0 +1,38 @@
+# docker-compose.yml — Dành cho VPS (KHÔNG clone source trên VPS)
+#
+# File này cùng với .env được đặt trên VPS tại ~/deploy/
+# Image được build và push bởi GitHub Actions CI/CD.
+#
+# ⚠️  TRƯỚC KHI DÙNG: Thay OWNER/REPO bên dưới bằng tên GitHub của bạn.
+#     Ví dụ: image: ghcr.io/vfmtech/zalo-bot-scanner:latest
+
+services:
+  zalo-bot:
+    image: ghcr.io/duylinhdang1998/zalo-scanner-bami:latest
+
+    container_name: zalo-bot-scanner
+
+    # Tự khởi động lại khi crash hoặc VPS reboot
+    restart: unless-stopped
+
+    # Đọc toàn bộ biến môi trường từ file .env đặt cùng thư mục trên VPS
+    env_file: .env
+
+    # JSON-file logging: giới hạn dung lượng tránh đầy disk VPS
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Healthcheck: bot long-polling, không có HTTP server.
+    # Kiểm tra process python main.py còn sống trong container.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python main.py' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # DB = Supabase ngoài → không cần volume local cho DB.
+    # Nếu cần lưu file tạm, thêm volume ở đây.
